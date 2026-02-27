@@ -287,6 +287,51 @@ async function startServer() {
 
     res.json({ id: expenseId });
   });
+  // Change Password
+app.post("/api/user/change-password", async (req, res) => {
+  const currentUser = (req as any).currentUser;
+  const { oldPassword, newPassword } = req.body;
+
+  if (!oldPassword || !newPassword) {
+    return res.status(400).json({
+      success: false,
+      message: "Old password and new password are required",
+    });
+  }
+
+  try {
+    const user = await UserModel.findOne({ id: currentUser });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    if (user.password !== oldPassword) {
+      return res.status(401).json({
+        success: false,
+        message: "Old password is incorrect",
+      });
+    }
+
+    user.password = newPassword;
+    await user.save();
+
+    return res.json({
+      success: true,
+      message: "Password changed successfully",
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
+  }
+});
+
+  
 
   // Delete Expense
   app.delete("/api/expenses/:id", async (req, res) => {

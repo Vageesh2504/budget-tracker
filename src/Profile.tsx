@@ -132,7 +132,10 @@ const Profile: React.FC<ProfileProps> = ({ userId, onLogout }) => {
           'Content-Type': 'application/json',
           'x-user-id': String(userId)
         },
-        body: JSON.stringify({ currentPassword, newPassword })
+       body: JSON.stringify({
+  oldPassword: currentPassword,
+  newPassword: newPassword
+})
       });
       const data = await res.json();
       if (data.success) {
@@ -410,3 +413,4 @@ const Profile: React.FC<ProfileProps> = ({ userId, onLogout }) => {
 };
 
 export default Profile;
+

@@ -140,7 +140,7 @@ async function startServer() {
   // ============================
 
   // User signup
-  app.post("/api/signup", async (req, res) => {
+  app.post("https://budget-tracker-l4s7.onrender.com/api/signup", async (req, res) => {
     const { username, password } = req.body;
     if (!username || !password) {
       return res.status(400).json({ success: false, message: "Missing username or password" });

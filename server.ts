@@ -432,7 +432,7 @@ app.get('/', (req, res) => {
   res.send('https://budget-tracker-l4s7.onrender.com')
 })
 
-  app.listen(PORT, "0.0.0.0", () => {
+  app.listen(PORT, "106.192.246.248/32", () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
 }

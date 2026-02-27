@@ -2,222 +2,402 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
-import Database from "better-sqlite3";
+import mongoose from "mongoose";
+import dns from "node:dns";
+
+// Use Google public DNS to resolve MongoDB Atlas SRV records
+dns.setServers(["8.8.8.8", "8.8.4.4"]);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const db = new Database("expenses.db");
-
 // ============================
-// Initialize Database
+// Mongoose Schemas & Models
 // ============================
-db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT UNIQUE,
-    password TEXT
+
+// Counter schema for auto-incrementing numeric IDs
+const counterSchema = new mongoose.Schema({
+  _id: { type: String, required: true },
+  seq: { type: Number, default: 0 },
+});
+const Counter = mongoose.model("Counter", counterSchema);
+
+async function getNextId(name: string): Promise<number> {
+  const counter = await Counter.findByIdAndUpdate(
+    name,
+    { $inc: { seq: 1 } },
+    { returnDocument: "after", upsert: true }
   );
-
-  CREATE TABLE IF NOT EXISTS categories (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT UNIQUE,
-    color TEXT
-  );
-
-  CREATE TABLE IF NOT EXISTS expenses (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER,
-    amount REAL,
-    category_id INTEGER,
-    description TEXT,
-    date TEXT,
-    FOREIGN KEY(user_id) REFERENCES users(id),
-    FOREIGN KEY(category_id) REFERENCES categories(id)
-  );
-
-  CREATE TABLE IF NOT EXISTS budgets (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER,
-    category_id INTEGER,
-    amount REAL,
-    month TEXT,
-    FOREIGN KEY(user_id) REFERENCES users(id),
-    FOREIGN KEY(category_id) REFERENCES categories(id),
-    UNIQUE(user_id, category_id, month)
-  );
-`);
-
-// ============================
-// Seed Default Categories
-// ============================
-const categoryCount = db
-  .prepare("SELECT COUNT(*) as count FROM categories")
-  .get() as { count: number };
-
-if (categoryCount.count === 0) {
-  const insertCategory = db.prepare(
-    "INSERT INTO categories (name, color) VALUES (?, ?)"
-  );
-
-  const defaultCategories = [
-    ["Food", "#ef4444"],
-    ["Transport", "#3b82f6"],
-    ["Entertainment", "#a855f7"],
-    ["Shopping", "#ec4899"],
-    ["Utilities", "#f59e0b"],
-    ["Health", "#10b981"],
-    ["Other", "#6b7280"],
-  ];
-
-  defaultCategories.forEach(([name, color]) =>
-    insertCategory.run(name, color)
-  );
+  return counter.seq;
 }
 
-// ============================
-// Create Default Demo User
-// ============================
-const userCount = db
-  .prepare("SELECT COUNT(*) as count FROM users")
-  .get() as { count: number };
+const userSchema = new mongoose.Schema({
+  id: { type: Number, unique: true },
+  username: { type: String, unique: true, required: true },
+  password: { type: String, required: true },
+  email: { type: String, default: null },
+  phone: { type: String, default: null },
+  created_at: { type: Date, default: Date.now },
+});
+const UserModel = mongoose.model("User", userSchema);
 
-if (userCount.count === 0) {
-  db.prepare("INSERT INTO users (username, password) VALUES (?, ?)")
-    .run("demo", "password");
+const categorySchema = new mongoose.Schema({
+  id: { type: Number, unique: true },
+  name: { type: String, unique: true, required: true },
+  color: { type: String, required: true },
+});
+const CategoryModel = mongoose.model("Category", categorySchema);
+
+const expenseSchema = new mongoose.Schema({
+  id: { type: Number, unique: true },
+  user_id: { type: Number, required: true },
+  amount: { type: Number, required: true },
+  category_id: { type: Number, required: true },
+  description: { type: String },
+  date: { type: String },
+});
+const ExpenseModel = mongoose.model("Expense", expenseSchema);
+
+const budgetSchema = new mongoose.Schema({
+  id: { type: Number, unique: true },
+  user_id: { type: Number, required: true },
+  category_id: { type: Number, required: true },
+  amount: { type: Number, required: true },
+  month: { type: String, required: true },
+});
+budgetSchema.index({ user_id: 1, category_id: 1, month: 1 }, { unique: true });
+const BudgetModel = mongoose.model("Budget", budgetSchema);
+
+// ============================
+// Seed Default Data
+// ============================
+async function seedDatabase() {
+  // Seed default categories
+  const categoryCount = await CategoryModel.countDocuments();
+  if (categoryCount === 0) {
+    const defaultCategories = [
+      { name: "Food", color: "#ef4444" },
+      { name: "Transport", color: "#3b82f6" },
+      { name: "Entertainment", color: "#a855f7" },
+      { name: "Shopping", color: "#ec4899" },
+      { name: "Utilities", color: "#f59e0b" },
+      { name: "Health", color: "#10b981" },
+      { name: "Other", color: "#6b7280" },
+    ];
+
+    for (const cat of defaultCategories) {
+      const catId = await getNextId("category");
+      await CategoryModel.create({ id: catId, ...cat });
+    }
+  }
+
+  // Seed default demo user
+  const userCount = await UserModel.countDocuments();
+  if (userCount === 0) {
+    const userId = await getNextId("user");
+    await UserModel.create({
+      id: userId,
+      username: "demo",
+      password: "password",
+    });
+  }
 }
 
 // ============================
 // Start Server
 // ============================
 async function startServer() {
+  // Connect to MongoDB (non-blocking in dev) so server can start even if Atlas is unreachable
+  const mongoUri = process.env.MONGO_URI || "mongodb+srv://hlvageesh2504_db_user:visitorLog2@visitorlog.cfn3jcq.mongodb.net/?appName=visitorLog";
+  mongoose.connect(mongoUri)
+    .then(async () => {
+      console.log('MongoDB connected');
+      try {
+        await seedDatabase();
+      } catch (err) {
+        console.error('Error seeding database:', err);
+      }
+    })
+    .catch((err) => {
+      console.error('MongoDB connection failed (continuing in dev without DB):', err.message || err);
+    });
+
   const app = express();
-  const PORT = 3000;
+  const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
   app.use(express.json());
 
-  const currentUser = 1; // Hardcoded demo user
+  // middleware to extract current user from header
+  app.use((req, res, next) => {
+    const header = req.header("x-user-id");
+    // default to demo user 1 if no header provided
+    (req as any).currentUser = header ? parseInt(header, 10) : 1;
+    next();
+  });
 
   // ============================
   // API Routes
   // ============================
 
+  // User signup
+  app.post("/api/signup", async (req, res) => {
+    const { username, password } = req.body;
+    if (!username || !password) {
+      return res.status(400).json({ success: false, message: "Missing username or password" });
+    }
+
+    try {
+      const userId = await getNextId("user");
+      await UserModel.create({ id: userId, username, password });
+      return res.json({ success: true, userId });
+    } catch (err: any) {
+      if (err.code === 11000) {
+        return res.status(409).json({ success: false, message: "Username already taken" });
+      }
+      return res.status(500).json({ success: false, message: "Server error" });
+    }
+  });
+
+  // User login
+  app.post("/api/login", async (req, res) => {
+    const { username, password } = req.body;
+    if (!username || !password) {
+      return res.status(400).json({ success: false, message: "Missing username or password" });
+    }
+    const user = await UserModel.findOne({ username });
+    if (!user || user.password !== password) {
+      return res.status(401).json({ success: false, message: "Invalid credentials" });
+    }
+    return res.json({ success: true, userId: user.id });
+  });
+
+  // Get User Profile
+  app.get("/api/user/profile", async (req, res) => {
+    const currentUser = (req as any).currentUser;
+    const user = await UserModel.findOne({ id: currentUser }).lean();
+
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    const expensesCount = await ExpenseModel.countDocuments({ user_id: currentUser });
+
+    const totalResult = await ExpenseModel.aggregate([
+      { $match: { user_id: currentUser } },
+      { $group: { _id: null, total: { $sum: "$amount" } } },
+    ]);
+    const totalSpent = totalResult.length > 0 ? totalResult[0].total : 0;
+
+    res.json({
+      id: user.id,
+      username: user.username,
+      email: user.email,
+      phone: user.phone,
+      created_at: user.created_at,
+      expenses_count: expensesCount,
+      total_spent: totalSpent,
+    });
+  });
+
+  // Update User Profile
+  app.put("/api/user/profile", async (req, res) => {
+    const currentUser = (req as any).currentUser;
+    const { username, email, phone } = req.body;
+
+    if (!username) {
+      return res.status(400).json({ success: false, message: "Username is required" });
+    }
+
+    try {
+      await UserModel.updateOne(
+        { id: currentUser },
+        { $set: { username, email, phone } }
+      );
+      return res.json({ success: true, message: "Profile updated successfully" });
+    } catch (err: any) {
+      if (err.code === 11000) {
+        return res.status(409).json({ success: false, message: "Username already taken" });
+      }
+      return res.status(500).json({ success: false, message: "Server error" });
+    }
+  });
+
+  // Delete User Account
+  app.delete("/api/user/profile", async (req, res) => {
+    const currentUser = (req as any).currentUser;
+    try {
+      await ExpenseModel.deleteMany({ user_id: currentUser });
+      await BudgetModel.deleteMany({ user_id: currentUser });
+      await UserModel.deleteOne({ id: currentUser });
+      return res.json({ success: true, message: "Account deleted successfully" });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, message: "Server error" });
+    }
+  });
+
   // Get Categories
-  app.get("/api/categories", (req, res) => {
-    const categories = db.prepare("SELECT * FROM categories").all();
-    res.json(categories);
+  app.get("/api/categories", async (req, res) => {
+    const categories = await CategoryModel.find().lean();
+    res.json(categories.map((c) => ({ id: c.id, name: c.name, color: c.color })));
   });
 
   // Get Expenses
-  app.get("/api/expenses", (req, res) => {
-    const expenses = db
-      .prepare(`
-        SELECT e.*, c.name as category_name, c.color as category_color
-        FROM expenses e
-        JOIN categories c ON e.category_id = c.id
-        WHERE e.user_id = ?
-        ORDER BY e.date DESC
-      `)
-      .all(currentUser);
+  app.get("/api/expenses", async (req, res) => {
+    const currentUser = (req as any).currentUser;
 
-    res.json(expenses);
+    const expenses = await ExpenseModel.find({ user_id: currentUser })
+      .sort({ date: -1 })
+      .lean();
+
+    // Join category info
+    const categoryIds = [...new Set(expenses.map((e) => e.category_id))];
+    const categories = await CategoryModel.find({ id: { $in: categoryIds } }).lean();
+    const catMap = new Map(categories.map((c) => [c.id, c]));
+
+    const result = expenses.map((e) => {
+      const cat = catMap.get(e.category_id);
+      return {
+        id: e.id,
+        amount: e.amount,
+        category_id: e.category_id,
+        category_name: cat?.name || "Unknown",
+        category_color: cat?.color || "#6b7280",
+        description: e.description,
+        date: e.date,
+      };
+    });
+
+    res.json(result);
   });
 
   // Add Expense
-  app.post("/api/expenses", (req, res) => {
+  app.post("/api/expenses", async (req, res) => {
+    const currentUser = (req as any).currentUser;
     const { amount, category_id, description, date } = req.body;
 
-    const result = db
-      .prepare(`
-        INSERT INTO expenses (user_id, amount, category_id, description, date)
-        VALUES (?, ?, ?, ?, ?)
-      `)
-      .run(currentUser, amount, category_id, description, date);
+    const expenseId = await getNextId("expense");
+    await ExpenseModel.create({
+      id: expenseId,
+      user_id: currentUser,
+      amount,
+      category_id,
+      description,
+      date,
+    });
 
-    res.json({ id: result.lastInsertRowid });
+    res.json({ id: expenseId });
   });
 
   // Delete Expense
-  app.delete("/api/expenses/:id", (req, res) => {
-    db.prepare("DELETE FROM expenses WHERE id = ? AND user_id = ?")
-      .run(req.params.id, currentUser);
+  app.delete("/api/expenses/:id", async (req, res) => {
+    const currentUser = (req as any).currentUser;
+    await ExpenseModel.deleteOne({
+      id: parseInt(req.params.id, 10),
+      user_id: currentUser,
+    });
 
     res.json({ success: true });
   });
 
   // Get Budgets
-  app.get("/api/budgets", (req, res) => {
+  app.get("/api/budgets", async (req, res) => {
+    const currentUser = (req as any).currentUser;
     const month =
       (req.query.month as string) ||
       new Date().toISOString().slice(0, 7);
 
-    const budgets = db
-      .prepare(`
-        SELECT b.*, c.name as category_name
-        FROM budgets b
-        JOIN categories c ON b.category_id = c.id
-        WHERE b.user_id = ? AND b.month = ?
-      `)
-      .all(currentUser, month);
+    const budgets = await BudgetModel.find({
+      user_id: currentUser,
+      month,
+    }).lean();
 
-    res.json(budgets);
+    // Join category names
+    const categoryIds = budgets.map((b) => b.category_id);
+    const categories = await CategoryModel.find({ id: { $in: categoryIds } }).lean();
+    const catMap = new Map(categories.map((c) => [c.id, c]));
+
+    const result = budgets.map((b) => ({
+      id: b.id,
+      category_id: b.category_id,
+      category_name: catMap.get(b.category_id)?.name || "Unknown",
+      amount: b.amount,
+      month: b.month,
+    }));
+
+    res.json(result);
   });
 
   // Add / Update Budget
-  app.post("/api/budgets", (req, res) => {
+  app.post("/api/budgets", async (req, res) => {
+    const currentUser = (req as any).currentUser;
     const { category_id, amount, month } = req.body;
 
-    const result = db
-      .prepare(`
-        INSERT INTO budgets (user_id, category_id, amount, month)
-        VALUES (?, ?, ?, ?)
-        ON CONFLICT(user_id, category_id, month)
-        DO UPDATE SET amount = excluded.amount
-      `)
-      .run(currentUser, category_id, amount, month);
+    const existing = await BudgetModel.findOne({
+      user_id: currentUser,
+      category_id,
+      month,
+    });
 
-    res.json({ id: result.lastInsertRowid });
+    if (existing) {
+      existing.amount = amount;
+      await existing.save();
+      res.json({ id: existing.id });
+    } else {
+      const budgetId = await getNextId("budget");
+      await BudgetModel.create({
+        id: budgetId,
+        user_id: currentUser,
+        category_id,
+        amount,
+        month,
+      });
+      res.json({ id: budgetId });
+    }
   });
 
   // Monthly Summary Stats
-  app.get("/api/stats/summary", (req, res) => {
+  app.get("/api/stats/summary", async (req, res) => {
+    const currentUser = (req as any).currentUser;
     const month =
       (req.query.month as string) ||
       new Date().toISOString().slice(0, 7);
 
-    const totalSpent = db
-      .prepare(`
-        SELECT SUM(amount) as total
-        FROM expenses
-        WHERE user_id = ?
-        AND strftime('%Y-%m', date) = ?
-      `)
-      .get(currentUser, month) as { total: number };
+    // Match expenses for this user whose date starts with the month string (YYYY-MM)
+    const monthRegex = new RegExp(`^${month}`);
 
-    const categoryBreakdown = db
-      .prepare(`
-        SELECT c.name, SUM(e.amount) as value, c.color
-        FROM expenses e
-        JOIN categories c ON e.category_id = c.id
-        WHERE e.user_id = ?
-        AND strftime('%Y-%m', date) = ?
-        GROUP BY c.id
-      `)
-      .all(currentUser, month);
+    // Total spent
+    const totalResult = await ExpenseModel.aggregate([
+      { $match: { user_id: currentUser, date: { $regex: monthRegex } } },
+      { $group: { _id: null, total: { $sum: "$amount" } } },
+    ]);
+    const totalSpent = totalResult.length > 0 ? totalResult[0].total : 0;
 
-    const dailySpending = db
-      .prepare(`
-        SELECT date, SUM(amount) as amount
-        FROM expenses
-        WHERE user_id = ?
-        AND strftime('%Y-%m', date) = ?
-        GROUP BY date
-        ORDER BY date ASC
-      `)
-      .all(currentUser, month);
+    // Category breakdown
+    const categoryBreakdownRaw = await ExpenseModel.aggregate([
+      { $match: { user_id: currentUser, date: { $regex: monthRegex } } },
+      { $group: { _id: "$category_id", value: { $sum: "$amount" } } },
+    ]);
+
+    const catIds = categoryBreakdownRaw.map((c) => c._id);
+    const categories = await CategoryModel.find({ id: { $in: catIds } }).lean();
+    const catMap = new Map(categories.map((c) => [c.id, c]));
+
+    const categoryBreakdown = categoryBreakdownRaw.map((c) => ({
+      name: catMap.get(c._id)?.name || "Unknown",
+      value: c.value,
+      color: catMap.get(c._id)?.color || "#6b7280",
+    }));
+
+    // Daily spending
+    const dailySpending = await ExpenseModel.aggregate([
+      { $match: { user_id: currentUser, date: { $regex: monthRegex } } },
+      { $group: { _id: "$date", amount: { $sum: "$amount" } } },
+      { $sort: { _id: 1 } },
+      { $project: { _id: 0, date: "$_id", amount: 1 } },
+    ]);
 
     res.json({
-      totalSpent: totalSpent.total || 0,
+      totalSpent,
       categoryBreakdown,
       dailySpending,
     });

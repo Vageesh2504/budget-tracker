@@ -1,1 +1,10 @@
 @import "tailwindcss";
+
+/* global background image for the app */
+body {
+  /* place a money-themed image in the public folder (e.g. public/money-bg.jpg) */
+  background-image: url('/money-bg.jpeg');
+  background-repeat: no-repeat;
+  background-size: cover;
+  background-position: center;
+}

@@ -9,7 +9,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Trash2,
-  PieChart as PieChartIcon
+  PieChart as PieChartIcon,
+  User
 } from 'lucide-react';
 import { 
   PieChart, 
@@ -29,7 +30,12 @@ import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, parseIS
 import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import './index.css';
 
+
+import Login from './Login';
+import Signup from './Signup';
+import Profile from './Profile';
 // Utility for tailwind classes
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -67,7 +73,11 @@ interface Stats {
 }
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'expenses' | 'budgets'>('dashboard');
+  // authentication state
+  const [userId, setUserId] = useState<number | null>(null);
+  const [showSignup, setShowSignup] = useState(false);
+
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'expenses' | 'budgets' | 'profile'>('dashboard');
   const [categories, setCategories] = useState<Category[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [budgets, setBudgets] = useState<Budget[]>([]);
@@ -78,16 +88,20 @@ export default function App() {
   const monthStr = format(currentMonth, 'yyyy-MM');
 
   useEffect(() => {
-    fetchData();
-  }, [currentMonth]);
+    if (userId !== null) {
+      fetchData();
+    }
+  }, [currentMonth, userId]);
+
+  const authHeaders = userId ? { 'x-user-id': String(userId) } : {};
 
   const fetchData = async () => {
     try {
       const [catsRes, expRes, budRes, statsRes] = await Promise.all([
-        fetch('/api/categories'),
-        fetch('/api/expenses'),
-        fetch(`/api/budgets?month=${monthStr}`),
-        fetch(`/api/stats/summary?month=${monthStr}`)
+        fetch('/api/categories', { headers: authHeaders }),
+        fetch('/api/expenses', { headers: authHeaders }),
+        fetch(`/api/budgets?month=${monthStr}`, { headers: authHeaders }),
+        fetch(`/api/stats/summary?month=${monthStr}`, { headers: authHeaders })
       ]);
 
       setCategories(await catsRes.json());
@@ -102,7 +116,7 @@ export default function App() {
   const addExpense = async (data: any) => {
     await fetch('/api/expenses', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders },
       body: JSON.stringify(data)
     });
     fetchData();
@@ -110,87 +124,118 @@ export default function App() {
   };
 
   const deleteExpense = async (id: number) => {
-    await fetch(`/api/expenses/${id}`, { method: 'DELETE' });
+    await fetch(`/api/expenses/${id}`, { method: 'DELETE', headers: authHeaders });
     fetchData();
   };
 
   const updateBudget = async (categoryId: number, amount: number) => {
     await fetch('/api/budgets', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders },
       body: JSON.stringify({ category_id: categoryId, amount, month: monthStr })
     });
     fetchData();
   };
 
+  if (userId === null) {
+    return showSignup ? (
+      <Signup onSuccess={id => setUserId(id)} switchToLogin={() => setShowSignup(false)} />
+    ) : (
+      <Login onSuccess={id => setUserId(id)} switchToSignup={() => setShowSignup(true)} />
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-[#f5f5f5] text-slate-900 font-sans">
+    <div className="min-h-screen bg-slate-5 text-slate-900 font-sans">
       {/* Sidebar / Navigation */}
-      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 px-6 py-3 flex justify-around items-center md:top-0 md:bottom-auto md:flex-col md:w-20 md:h-full md:border-t-0 md:border-r md:py-8 z-50">
-        <div className="hidden md:block mb-12">
-          <div className="w-10 h-10 bg-emerald-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-emerald-200">
-            <TrendingUp size={24} />
+      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 px-25 py-0 flex justify-around items-right
+       md:top-0 md:bottom-auto md:flex-col md:w-0 md:h-full md:border-t-0 md:border-r md:py-10 z-50"></nav>
+        <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 px-5 py-0 flex justify-around items-right
+       md:top-0 md:bottom-auto md:flex-col md:w-0 md:h-full md:border-t-0 md:border-r md:py-10 z-50"></nav>
+        <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 px-0 py-0 flex justify-around items-right
+       md:top-0 md:bottom-auto md:flex-col md:w-0 md:h-full md:border-t-0 md:border-r md:py-10 z-50">
+        
+        <div className="hidden md:block mb-20">
+          <div className="w-50 h-20 bg-emerald-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-emerald-200">
+            <TrendingUp size={50} />
           </div>
         </div>
         
         <NavButton 
           active={activeTab === 'dashboard'} 
           onClick={() => setActiveTab('dashboard')} 
-          icon={<LayoutDashboard size={24} />} 
+          icon={<LayoutDashboard size={50} />} 
           label="Dashboard" 
         />
+        <div className="hidden md:block mb-10"></div>
         <NavButton 
           active={activeTab === 'expenses'} 
           onClick={() => setActiveTab('expenses')} 
-          icon={<Receipt size={24} />} 
+          icon={<Receipt size={50} />} 
           label="Expenses" 
         />
+        <div className="hidden md:block mb-10"></div>
         <NavButton 
           active={activeTab === 'budgets'} 
           onClick={() => setActiveTab('budgets')} 
-          icon={<Wallet size={24} />} 
+          icon={<Wallet size={50} />} 
           label="Budgets" 
         />
-        
-        <div className="md:mt-auto">
+        <div className="hidden md:block mb-10">
+        </div>
+        <NavButton 
+          active={activeTab === 'profile'} 
+          onClick={() => setActiveTab('profile')} 
+          icon={<User size={50} />} 
+          label="Profile" 
+        />
+        <div className="hidden md:block mb-10"></div>
+        <div className="md:mt-auto flex flex-col gap-10 items-center">
           <button 
             onClick={() => setIsAddModalOpen(true)}
-            className="w-12 h-12 bg-emerald-600 text-white rounded-full flex items-center justify-center shadow-lg shadow-emerald-200 hover:bg-emerald-700 transition-colors"
-          >
-            <Plus size={28} />
+           
+           className="w-100 h-20 bg-emerald-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-emerald-200">
+            <Plus size={50} />
+          
+            
+          
+          
           </button>
         </div>
       </nav>
 
       {/* Main Content */}
-      <main className="pb-24 pt-6 px-4 md:pl-28 md:pt-12 md:pr-12 max-w-7xl mx-auto">
+      <main className="pb-4 pt-24 px-4 md:pl-28 md:pt-12 md:pr-12 max-w-7xl mx-auto">
         <header className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
           <div>
-            <h1 className="text-3xl font-bold tracking-tight text-slate-900">
+            <h1 className="text-6xl font-bold tracking-tight text-slate-900">
               {activeTab === 'dashboard' && 'Financial Overview'}
               {activeTab === 'expenses' && 'Expense History'}
               {activeTab === 'budgets' && 'Budget Planning'}
+              {activeTab === 'profile' && 'Account Profile'}
             </h1>
-            <p className="text-slate-500 mt-1">Manage your wealth with precision.</p>
+            <p className="text-2xl font-bold tracking-tight text-slate-900">Manage your wealth with precision.</p>
           </div>
 
-          <div className="flex items-center bg-white rounded-2xl p-1 shadow-sm border border-slate-200">
-            <button 
-              onClick={() => setCurrentMonth(prev => new Date(prev.getFullYear(), prev.getMonth() - 1))}
-              className="p-2 hover:bg-slate-50 rounded-xl transition-colors"
-            >
-              <ChevronLeft size={20} />
-            </button>
-            <div className="px-4 font-medium min-w-[140px] text-center">
-              {format(currentMonth, 'MMMM yyyy')}
+          {activeTab !== 'profile' && (
+            <div className="flex items-center bg-white rounded-2xl p-1 shadow-sm border border-slate-200">
+              <button 
+                onClick={() => setCurrentMonth(prev => new Date(prev.getFullYear(), prev.getMonth() - 1))}
+                className="p-2 hover:bg-slate-50 rounded-xl transition-colors"
+              >
+                <ChevronLeft size={20} />
+              </button>
+              <div className="px-4 font-medium min-w-[140px] text-center">
+                {format(currentMonth, 'MMMM yyyy')}
+              </div>
+              <button 
+                onClick={() => setCurrentMonth(prev => new Date(prev.getFullYear(), prev.getMonth() + 1))}
+                className="p-2 hover:bg-slate-50 rounded-xl transition-colors"
+              >
+                <ChevronRight size={20} />
+              </button>
             </div>
-            <button 
-              onClick={() => setCurrentMonth(prev => new Date(prev.getFullYear(), prev.getMonth() + 1))}
-              className="p-2 hover:bg-slate-50 rounded-xl transition-colors"
-            >
-              <ChevronRight size={20} />
-            </button>
-          </div>
+          )}
         </header>
 
         <AnimatePresence mode="wait">
@@ -444,6 +489,10 @@ export default function App() {
                 );
               })}
             </motion.div>
+          )}
+
+          {activeTab === 'profile' && (
+            <Profile userId={userId} onLogout={() => setUserId(null)} />
           )}
         </AnimatePresence>
       </main>

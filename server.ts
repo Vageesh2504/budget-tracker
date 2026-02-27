@@ -425,11 +425,11 @@ async function startServer() {
   // ============================
   // Start Listening
   // ============================
- const app = express()
+ 
 const port = process.env.PORT || 4000
 
 app.get('/', (req, res) => {
-  res.send('Hello World!')
+  res.send('https://budget-tracker-l4s7.onrender.com')
 })
 
   app.listen(PORT, "0.0.0.0", () => {

@@ -108,7 +108,7 @@ async function seedDatabase() {
 // ============================
 async function startServer() {
   // Connect to MongoDB (non-blocking in dev) so server can start even if Atlas is unreachable
-  const mongoUri = process.env.MONGO_URI || "mongodb+srv://hlvageesh2504_db_user:visitorLog2@visitorlog.cfn3jcq.mongodb.net/?appName=visitorLog";
+  const mongoUri = process.env.MONGO_URI || "mongodb+srv://hlvageesh2504_db_user:vageesh123@visitorlog.cfn3jcq.mongodb.net/?appName=visitorLog";
   mongoose.connect(mongoUri)
     .then(async () => {
       console.log('MongoDB connected');
